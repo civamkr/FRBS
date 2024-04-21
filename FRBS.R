@@ -185,8 +185,15 @@ CV.search.rkhs.regression = function(y, X, lambda_set, zeta_set, delta = 20){
 }
 
 ## Local refinement based on FRBS
-local.refine.RKHS.regression = function(cpt_init, beta_hat, y, X, lambda, w = 0.9){
-  n = nrow(X)
+rkhs_error = function(y_vec, x_mat, beta_hat){
+  p = dim(x_mat)[2]
+  loss = sum((y_vec - (1/p) * x_mat %*% beta_hat)^2)
+  return(loss)
+}
+
+
+local.refine.RKHS.regression = function(cpt_init, beta_hat, y_vec, x_mat, w = 0.9){
+  n = length(y_vec)
   cpt_init_long = c(0, cpt_init, n)
   cpt_init_numb = length(cpt_init)
   cpt_refined = rep(0, cpt_init_numb+1)
@@ -195,9 +202,7 @@ local.refine.RKHS.regression = function(cpt_init, beta_hat, y, X, lambda, w = 0.
     e = (1-w)*cpt_init_long[k+1] + w*cpt_init_long[k+2]
     lower = ceiling(s) + 2
     upper = floor(e) - 2
-    
-    
-    b = sapply(lower:upper, function(eta)(lassoDPDU_error(y[ceiling(s):eta], cbind(rep(1, n), X)[ceiling(s):eta,], beta_hat[,k]) + lassoDPDU_error(y[(eta+1):floor(e)], cbind(rep(1, n), X)[(eta+1):floor(e),], beta_hat[,k+1])))
+    b = sapply(lower:upper, function(eta)(rkhs_error(y_vec[ceiling(s):eta], x_mat[ceiling(s):eta,], beta_hat[,k]) + rkhs_error(y_vec[(eta+1):floor(e)], x_mat[(eta+1):floor(e),], beta_hat[,k+1])))
     cpt_refined[k+1] = ceiling(s) + which.min(b)
   }
   return(cpt_refined[-1])
@@ -205,27 +210,23 @@ local.refine.RKHS.regression = function(cpt_init, beta_hat, y, X, lambda, w = 0.
 
 
 ## estimate the jump size
-kappa2_rkhs_est = function(y_vec, x_mat, cpt_rkhs_hat){
+kappa2_rkhs_est = function(y_vec, x_mat, cpt_rkhs_hat, lambda_rkhs){
   n = length(y_vec)
   p = dim(x_mat)[2]
   Khat_rkhs = length(cpt_rkhs_hat)
   cpt_rkhs_hat_long = c(0, cpt_rkhs_hat, n)
-  K_mat = matrix(0, p, p)
-  for(j in 1:p){
-    for(i in 1:j){
-      K_mat[i,j] = cosh(grid[i])*cosh(1-grid[j])/sinh(1)
-    }
-  }
-  K_mat = K_mat + t(K_mat) - diag(diag(K_mat))
   beta_hat_mat = matrix(NA, p, Khat_rkhs+1)
   kappa2_hat_vec = rep(NA, Khat_rkhs)
   for(i in 1:(Khat_rkhs+1)){
-    y_vec_c = scale(y_vec[(cpt_rkhs_hat_long[i]+1):cpt_rkhs_hat_long[i+1]], center = TRUE, scale = FALSE)
-    x_mat_c = scale(x_mat[(cpt_rkhs_hat_long[i]+1):cpt_rkhs_hat_long[i+1],], center = TRUE, scale = FALSE)
-    beta_hat_mat[,i] = rkhs_reg(y_vec_c, x_mat_c, lambda_rkhs_CV)$beta_hat_grid
+    y_vec_c = y_vec[(cpt_rkhs_hat_long[i]+1):cpt_rkhs_hat_long[i+1]]
+    x_mat_c = x_mat[(cpt_rkhs_hat_long[i]+1):cpt_rkhs_hat_long[i+1],]
+    beta_hat_mat[,i] = rkhs_reg(y_vec_c, x_mat_c, lambda_rkhs)$beta_hat_grid
   }
+  xc_mat = scale(x_mat, center = TRUE, scale = FALSE)
+  cov_mat_hat = t(xc_mat)%*%xc_mat/n
+  
   for(i in 1:Khat_rkhs){
-    kappa2_hat_vec[i] = (1/p^2)*t(beta_hat_mat[,(i+1)] - beta_hat_mat[,i])%*%K_mat%*%(beta_hat_mat[,(i+1)] - beta_hat_mat[,i])
+    kappa2_hat_vec[i] = (1/p^2)*t(beta_hat_mat[,(i+1)] - beta_hat_mat[,i])%*%cov_mat_hat%*%(beta_hat_mat[,(i+1)] - beta_hat_mat[,i])
   }
   return(list(kappa2=kappa2_hat_vec, beta=beta_hat_mat))
 }
